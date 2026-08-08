@@ -3,8 +3,8 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  defaultTargetSchools, LanguageTestType, SchoolLevel, seedStudents, Student,
-  StudentFormValues, StudentStatus, TargetSchool
+  defaultTargetSchools, HonorItem, LanguageTestType, SchoolLevel, seedStudents, Student,
+  StudentFormValues, StudentHonors, StudentStatus, TargetSchool
 } from "@/lib/students";
 
 type DataSource = "supabase" | "fallback";
@@ -21,6 +21,7 @@ type StudentContextValue = {
   deleteStudent: (id: string) => MutationResult;
   togglePinned: (id: string) => void;
   updateTargetSchools: (id: string, schools: TargetSchool[]) => MutationResult;
+  updateHonors: (id: string, honors: StudentHonors) => MutationResult;
 };
 
 type StudentRow = {
@@ -37,6 +38,7 @@ type StudentRow = {
   application_status: string | null;
   application_progress: number | null;
   target_schools: unknown;
+  honors: unknown;
   created_at: string | null;
 };
 
@@ -65,6 +67,12 @@ function normalizeStatus(value: string | null): StudentStatus {
   return (["规划中", "材料准备", "申请中", "已录取"].includes(value || "") ? value : "规划中") as StudentStatus;
 }
 
+function normalizeHonors(value: unknown): StudentHonors {
+  const source = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const normalizeItems = (items: unknown): HonorItem[] => Array.isArray(items) ? items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object").map((item) => ({ title: typeof item.title === "string" ? item.title : "", year: typeof item.year === "string" ? item.year : "" })).filter((item) => item.title) : [];
+  return { activities: normalizeItems(source.activities), competitions: normalizeItems(source.competitions) };
+}
+
 function rowToStudent(row: StudentRow, index: number, pinned: Record<string, boolean>): Student {
   return {
     id: row.id,
@@ -82,6 +90,7 @@ function rowToStudent(row: StudentRow, index: number, pinned: Record<string, boo
     progress: row.application_progress ?? 0,
     isPinned: Boolean(pinned[row.id]),
     targetSchools: normalizeSchools(row.target_schools),
+    honors: normalizeHonors(row.honors),
     color: colors[index % colors.length],
     updated: row.created_at ? new Date(row.created_at).toLocaleDateString("zh-CN") : "数据库同步"
   };
@@ -136,7 +145,8 @@ export function StudentProvider({ children }: { children: React.ReactNode }) {
       counselor: "待分配",
       application_status: "规划中",
       application_progress: 8,
-      target_schools: defaultTargetSchools
+      target_schools: defaultTargetSchools,
+      honors: { activities: [], competitions: [] }
     });
     if (mutationError) return handleMutationError("新增学生失败", mutationError.message);
     await refreshStudents();
@@ -173,13 +183,20 @@ export function StudentProvider({ children }: { children: React.ReactNode }) {
     return true;
   }
 
+  async function updateHonors(id: string, honors: StudentHonors) {
+    const { error: mutationError } = await supabase.from("students").update({ honors }).eq("id", id);
+    if (mutationError) return handleMutationError("保存荣誉展示失败", mutationError.message);
+    await refreshStudents();
+    return true;
+  }
+
   function handleMutationError(prefix: string, message: string) {
     console.error(`${prefix}:`, message);
     setError(`${prefix}：${message}`);
     return false;
   }
 
-  return <StudentContext.Provider value={{ students, hydrated, dataSource, error, refreshStudents, addStudent, updateStudent, deleteStudent, togglePinned, updateTargetSchools }}>{children}</StudentContext.Provider>;
+  return <StudentContext.Provider value={{ students, hydrated, dataSource, error, refreshStudents, addStudent, updateStudent, deleteStudent, togglePinned, updateTargetSchools, updateHonors }}>{children}</StudentContext.Provider>;
 }
 
 export function useStudents() {
